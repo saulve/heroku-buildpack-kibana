@@ -21,10 +21,11 @@ fi
 if [ -f "$ENV_DIR/DOWNLOAD_URL" ]; then
   DOWNLOAD_URL=$(cat $ENV_DIR/DOWNLOAD_URL)
 else
-  DOWNLOAD_URL="https://download.elastic.co/kibana/kibana/kibana-4.6.3-linux-x86_64.tar.gz"
+  DOWNLOAD_URL="https://artifacts.elastic.co/downloads/kibana/kibana-5.3.0-linux-x86_64.tar.gz"
 fi
 
 KIBANA_PACKAGE=${DOWNLOAD_URL##*/}
+echo $KIBANA_PACKAGE
 
 case ${KIBANA_PACKAGE} in
   *.tar.gz)
