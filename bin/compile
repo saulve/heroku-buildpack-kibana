@@ -18,10 +18,16 @@ else
   ELASTICSEARCH_URL="http://localhost:9200"
 fi
 
+# Check for username/password
+if [ ! -z "$(echo $ELASTICSEARCH_URL | egrep '://[a-zA-Z0-9]{1,}:[a-zA-Z0-9]{1,}@')" ]; then
+  UNAME="$(echo $ELASTICSEARCH_URL | egrep '://[a-zA-Z0-9]{1,}:[a-zA-Z0-9]{1,}@' | sed -E 's/.*:\/\/([a-zA-Z0-9]{1,}):([a-zA-Z0-9]{1,}).*/\1/')"
+  PWORD="$(echo $ELASTICSEARCH_URL | egrep '://[a-zA-Z0-9]{1,}:[a-zA-Z0-9]{1,}@' | sed -E 's/.*:\/\/([a-zA-Z0-9]{1,}):([a-zA-Z0-9]{1,}).*/\2/')"
+fi
+
 if [ -f "$ENV_DIR/DOWNLOAD_URL" ]; then
   DOWNLOAD_URL=$(cat $ENV_DIR/DOWNLOAD_URL)
 else
-  DOWNLOAD_URL="https://artifacts.elastic.co/downloads/kibana/kibana-5.3.0-linux-x86_64.tar.gz"
+  DOWNLOAD_URL="https://artifacts.elastic.co/downloads/kibana/kibana-5.4.3-linux-x86_64.tar.gz"
 fi
 
 KIBANA_PACKAGE=${DOWNLOAD_URL##*/}
@@ -43,7 +49,8 @@ download="curl -sLO"
 extract="$tar -C $BUILD_DIR --wildcards -f"
 verify="sha1sum --check --warn"
 configure='sed -i s/^\x23\x20\(elasticsearch.url:\x20\).\{1,\}/\1"'$(echo $ELASTICSEARCH_URL | sed 's/\//\\\//g')'"/'
-
+configure_user='sed -i s/^\x23\x20\(elasticsearch.username:\x20\).\{1,\}/\1"'$(echo $UNAME | sed 's/\//\\\//g')'"/'
+configure_pass='sed -i s/^\x23\x20\(elasticsearch.password:\x20\).\{1,\}/\1"'$(echo $PWORD | sed 's/\//\\\//g')'"/'
 
 echo "-----> Installing Kibana..."
 
@@ -72,6 +79,11 @@ $extract $CACHE_DIR/$KIBANA_PACKAGE
 
 echo "-----> Configuring ELASTICSEARCH_URL"
 $configure $KIBANA_DIR/config/kibana.yml
+if [ ! -z "$(echo $ELASTICSEARCH_URL | egrep '://[a-zA-Z0-9]{1,}:[a-zA-Z0-9]{1,}@')" ]; then
+  $configure_user $KIBANA_DIR/config/kibana.yml
+  $configure_pass $KIBANA_DIR/config/kibana.yml
+fi
+
 
 echo "Exporting PATH" | indent
 echo 'export PATH="$PATH:'${KIBANA_DIR##*/}'/bin"' > $INIT_SCRIPT
