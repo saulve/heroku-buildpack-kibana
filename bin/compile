@@ -10,18 +10,30 @@ ENV_DIR=$3
 
 INIT_SCRIPT="$BUILD_DIR/.profile.d/kibana.sh"
 
-if [ -f "$ENV_DIR/ELASTICSEARCH_URL" ]; then
+# If the user supplied a URL and the URL is not empty, use it
+if [ -f "$ENV_DIR/ELASTICSEARCH_URL" ] && [ ! -z "$ENV_DIR/ELASTICSEARCH_URL" ]; then
   ELASTICSEARCH_URL="$(cat $ENV_DIR/ELASTICSEARCH_URL):443"
+
+# If the user DID NOT supply a URL, or the URL they supplied is empty,
+# use BONSAI_URL if it is available
 elif [ -f "$ENV_DIR/BONSAI_URL" ]; then
   ELASTICSEARCH_URL="$(cat $ENV_DIR/BONSAI_URL):443"
+
+# Default to localhost for lack of anything else?
 else
   ELASTICSEARCH_URL="http://localhost:9200"
+fi
+
+# Check for username/password
+if [ ! -z "$(echo $ELASTICSEARCH_URL | egrep '://[a-zA-Z0-9]{1,}:[a-zA-Z0-9]{1,}@')" ]; then
+  UNAME="$(echo $ELASTICSEARCH_URL | egrep '://[a-zA-Z0-9]{1,}:[a-zA-Z0-9]{1,}@' | sed -E 's/.*:\/\/([a-zA-Z0-9]{1,}):([a-zA-Z0-9]{1,}).*/\1/')"
+  PWORD="$(echo $ELASTICSEARCH_URL | egrep '://[a-zA-Z0-9]{1,}:[a-zA-Z0-9]{1,}@' | sed -E 's/.*:\/\/([a-zA-Z0-9]{1,}):([a-zA-Z0-9]{1,}).*/\2/')"
 fi
 
 if [ -f "$ENV_DIR/DOWNLOAD_URL" ]; then
   DOWNLOAD_URL=$(cat $ENV_DIR/DOWNLOAD_URL)
 else
-  DOWNLOAD_URL="https://download.elastic.co/kibana/kibana/kibana-4.6.3-linux-x86_64.tar.gz"
+  DOWNLOAD_URL="https://artifacts.elastic.co/downloads/kibana/kibana-5.4.3-linux-x86_64.tar.gz"
 fi
 
 KIBANA_PACKAGE=${DOWNLOAD_URL##*/}
@@ -41,8 +53,11 @@ mkdir="mkdir -p"
 download="curl -sLO"
 extract="$tar -C $BUILD_DIR --wildcards -f"
 verify="sha1sum --check --warn"
-configure='sed -i s/^\x23\x20\(elasticsearch.url:\x20\).\{1,\}/\1"'$(echo $ELASTICSEARCH_URL | sed 's/\//\\\//g')'"/'
-
+configure='sed -i s/^\x23\(elasticsearch.url:\x20\).\{1,\}/\1"'$(echo $ELASTICSEARCH_URL | sed 's/\//\\\//g')'"/'
+configure_user='sed -i s/^\x23\(elasticsearch.username:\x20\).\{1,\}/\1"'$(echo $UNAME | sed 's/\//\\\//g')'"/'
+configure_pass='sed -i s/^\x23\(elasticsearch.password:\x20\).\{1,\}/\1"'$(echo $PWORD | sed 's/\//\\\//g')'"/'
+configure_host='sed -i s/^\x23\(server.host:\x20\).\{1,\}/\10.0.0.0/'
+show_config='egrep "^\[^\x23\]"'
 
 echo "-----> Installing Kibana..."
 
@@ -50,12 +65,17 @@ $mkdir ${INIT_SCRIPT%/*}
 $mkdir $CACHE_DIR
 
 if [ ! -f "$CACHE_DIR/$KIBANA_PACKAGE" ]; then
-  echo "downloading $DOWNLOAD_URL" | indent
+
+  echo "downloading $KIBANA_PACKAGE from $DOWNLOAD_URL" | indent
   $download $DOWNLOAD_URL
 
-  echo "verifying against ${DOWNLOAD_URL}.sha1.txt" | indent
-  $download "${DOWNLOAD_URL}.sha1.txt"
-  $verify "${KIBANA_PACKAGE}.sha1.txt"
+  echo "verifying against ${DOWNLOAD_URL}.sha1" | indent
+  $download "${DOWNLOAD_URL}.sha1"
+  echo "$(cat ${KIBANA_PACKAGE}.sha1) *${KIBANA_PACKAGE}" > ${KIBANA_PACKAGE}.sha1
+  echo "Contents of the SHA1: " | indent
+  cat ${KIBANA_PACKAGE}.sha1
+
+  $verify "${KIBANA_PACKAGE}.sha1"
 
   if [ $? -eq 0 ]; then
     mv $KIBANA_PACKAGE $CACHE_DIR
@@ -68,6 +88,16 @@ $extract $CACHE_DIR/$KIBANA_PACKAGE
 
 echo "-----> Configuring ELASTICSEARCH_URL"
 $configure $KIBANA_DIR/config/kibana.yml
+$configure_host $KIBANA_DIR/config/kibana.yml
+echo "$(grep 'elasticsearch.url' $KIBANA_DIR/config/kibana.yml)" | indent
+if [ ! -z "$(echo $ELASTICSEARCH_URL | egrep '://[a-zA-Z0-9]{1,}:[a-zA-Z0-9]{1,}@')" ]; then
+  echo "Updating the authentication credentials" | indent
+  $configure_user $KIBANA_DIR/config/kibana.yml
+  $configure_pass $KIBANA_DIR/config/kibana.yml
+fi
+
+echo "Configuration settings applied:" | indent
+echo "$(egrep '^[^#]' $KIBANA_DIR/config/kibana.yml)" | indent
 
 echo "Exporting PATH" | indent
 echo 'export PATH="$PATH:'${KIBANA_DIR##*/}'/bin"' > $INIT_SCRIPT
